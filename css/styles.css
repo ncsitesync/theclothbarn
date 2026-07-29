@@ -779,17 +779,6 @@ button {
   gap: var(--space-3);
   margin-bottom: var(--space-3);
 }
-@media (max-width: 639px) {
-  .brands-heading__row { gap: var(--space-2); }
-  /* .brands-heading__title is flex: 0 0 auto — flex-shrink:0 means it never
-     yields width, so at 320-375px it held its full natural size (~330px+
-     for "Trusted Brands We Carry" at this clamp's 24px floor, uppercase,
-     0.04em tracking) against a container only ~275-330px wide, pushing the
-     row's total content past the viewport where #carry's overflow:hidden
-     clipped it. Letting it shrink lets normal text wrapping take over
-     instead of forcing a fixed too-wide box. */
-  .brands-heading__title { flex: 1 1 auto; min-width: 0; }
-}
 .brands-heading__line {
   flex: 1 1 40px;
   min-width: 24px;
@@ -805,6 +794,24 @@ button {
 .brands-heading__sub {
   font-size: var(--text-base);
   color: var(--text-on-light-muted);
+}
+@media (max-width: 639px) {
+  /* Previous attempt set .brands-heading__title to flex:1 1 auto in a media
+     query placed BEFORE the unconditional base rules above (flex:0 0 auto
+     for the title, flex:1 1 40px for the lines) — same specificity, later
+     source always wins regardless of media query, so that override was a
+     no-op and the title kept rendering at its full ~381px natural width
+     (23 chars at the clamp's 24px floor) inside a 342px-wide row (390px
+     viewport minus --container-pad x2), clipped by #carry's overflow:hidden.
+     This block is now placed AFTER those base rules so it actually wins.
+     Real fix: stop competing for the same row. Stack title above/below the
+     lines instead of beside them, so the title gets the full ~342px row
+     width to itself and wraps normally (needs ~232px for "TRUSTED BRANDS",
+     ~132px for "WE CARRY" at 24px — comfortable). flex:0 0 auto on the
+     title is harmless once stacked: in a column flex container that
+     property governs height, not width. */
+  .brands-heading__row { flex-direction: column; gap: var(--space-2); }
+  .brands-heading__line { flex: none; width: 60px; height: 1px; margin-inline: auto; }
 }
 .brand-row {
   display: flex;
