@@ -556,7 +556,14 @@ button {
 }
 @media (max-width: 640px) {
   .hero__crest { display: none; }
-  .hero { min-height: 100vh; }
+  .hero {
+    min-height: 100vh; /* fallback for browsers without dvh support */
+    min-height: 100dvh; /* actual visible viewport — 100vh uses the largest
+      possible one (chrome collapsed), so the page is laid out taller than
+      what's on screen; once mobile Safari/Chrome's address bar hides on
+      scroll, the real viewport grows to match it and the extra room shows
+      up as blank space below the footer. */
+  }
 }
 
 /* ==========================================================================
