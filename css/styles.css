@@ -207,6 +207,18 @@ button {
   max-width: 20ch;
   margin-bottom: var(--space-4);
 }
+@media (max-width: 640px) {
+  /* --text-3xl's clamp floor is 2.25rem (36px) and stays flat there for any
+     viewport <=360px (1.8rem+2vw only exceeds the floor above that) — so at
+     320-375px this heading was rendering at full desktop-floor size against
+     only ~275-328px of available width (viewport minus --container-pad on
+     both sides), well short of what its 26-character second line needs.
+     overflow-wrap is a defensive floor against clipping regardless of size. */
+  #carry-heading {
+    font-size: 1.75rem;
+    overflow-wrap: break-word;
+  }
+}
 
 /* Signature motif: a stitched seam divider, standing in for a plain rule */
 .seam-divider {
@@ -769,6 +781,14 @@ button {
 }
 @media (max-width: 639px) {
   .brands-heading__row { gap: var(--space-2); }
+  /* .brands-heading__title is flex: 0 0 auto — flex-shrink:0 means it never
+     yields width, so at 320-375px it held its full natural size (~330px+
+     for "Trusted Brands We Carry" at this clamp's 24px floor, uppercase,
+     0.04em tracking) against a container only ~275-330px wide, pushing the
+     row's total content past the viewport where #carry's overflow:hidden
+     clipped it. Letting it shrink lets normal text wrapping take over
+     instead of forcing a fixed too-wide box. */
+  .brands-heading__title { flex: 1 1 auto; min-width: 0; }
 }
 .brands-heading__line {
   flex: 1 1 40px;

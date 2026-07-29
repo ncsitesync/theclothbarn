@@ -380,6 +380,18 @@
     }
 
     function beginStep(distance) {
+      if (driftEnabled) {
+        // Drift was still running, so virtualPosition can be any fractional
+        // value between two cards (currentIndex, meanwhile, was never
+        // updated during drift and is stale). Snap both to the nearest card
+        // now, before the very first discrete step — otherwise "from" starts
+        // mid-card and every step after it keeps landing half a card off,
+        // which on touch is easy to trigger since a swipe holds contact for
+        // a few hundred ms of ambient drift before it fires, versus a
+        // near-instant desktop click that rarely drifts far enough to notice.
+        virtualPosition = Math.round(virtualPosition);
+        currentIndex = ((virtualPosition % realCount) + realCount) % realCount;
+      }
       driftEnabled = false;
       inDiscreteMode = true;
       if (stepping) return; // a click during an in-flight move is ignored, not queued
