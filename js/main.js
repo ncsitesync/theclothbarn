@@ -295,30 +295,42 @@
   }
 
   /* ========================================================================
-     Services carousel
-     Extends initGalleryCarousel()'s approach (measured pixel step, transform-
-     only movement, touch/keyboard nav) rather than modifying it — this
-     carousel needs autoplay, a real play/pause control and a seamless loop
-     that the gallery carousel doesn't, and the gallery must stay untouched.
-     Seamless looping is done by cloning the full slide set once on each side
-     of the track; "position" always self-corrects back into [0, realCount-1]
-     right after each animated move finishes, using a transition-less snap.
+     Services carousel — conveyor belt
+     Two permanent modes. Starts in DRIFT: a requestAnimationFrame loop
+     nudges a continuous float (virtualPosition, in real-slide units) at a
+     constant linear rate — one card-width roughly every 9s — pausing on
+     keyboard focus within the carousel (a WCAG pause mechanism for
+     auto-moving content) and resuming when focus leaves. Hover does NOT
+     pause it — the drift is meant to keep going while browsing with a
+     mouse. The first arrow/swipe interaction flips driftEnabled false for
+     good and switches to DISCRETE: normal eased single-card steps, no more
+     ambient motion, ever. Both modes render through the same rAF loop and
+     the same measured-step transform math as the gallery carousel
+     (getStep()), so a discrete step can pick up mid-drift from whatever
+     fractional position the belt was at with no jump. Seamless looping
+     reuses the gallery's clone-based buffer (full slide set cloned once on
+     each side); .carousel__track's CSS transition is off for this carousel
+     — every frame is transform-only and JS-owned, nothing else animates.
+     No active-card scale/shadow while drifting; it appears only once
+     discrete mode begins, tracking the current card from then on. No
+     pagination dots — arrows are the only manual control. Gallery's
+     initGalleryCarousel() is untouched; this is a separate function reusing
+     its pattern, not a shared one, so gallery is safe.
      ======================================================================== */
   function initServicesCarousel() {
     var root = document.getElementById("services-carousel");
     if (!root) return;
 
-    var viewport = root.querySelector(".carousel__viewport");
     var track = root.querySelector(".carousel__track");
     var prevBtn = root.querySelector(".carousel__arrow--prev");
     var nextBtn = root.querySelector(".carousel__arrow--next");
-    var dotsWrap = root.querySelector(".carousel__dots");
-    var playBtn = root.querySelector(".services-carousel__playpause");
     var realSlides = track ? Array.prototype.slice.call(track.children) : [];
-    if (!viewport || !track || !prevBtn || !nextBtn || !dotsWrap || !realSlides.length) return;
+    if (!track || !prevBtn || !nextBtn || !realSlides.length) return;
 
     var realCount = realSlides.length;
     var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var DRIFT_SPEED = 1 / 9; // real-slide-widths per second: one card drifts by roughly every 9s (8-10s target)
+    var STEP_DURATION = 600; // ms — within the site's established 500-700ms transition range
 
     realSlides.forEach(function (el, i) { el.setAttribute("data-real-index", String(i)); });
 
@@ -337,11 +349,13 @@
     cloneSet().slice().reverse().forEach(function (el) { track.insertBefore(el, track.firstChild); });
     var allSlides = Array.prototype.slice.call(track.children); // [clones][real][clones], 3x realCount
 
-    var position = 0; // normalized real index — always in [0, realCount-1] at rest
-    var playing = !reducedMotion;
-    var suspended = false;
-    var isAnimating = false;
-    var timer = null;
+    var virtualPosition = 0;            // continuous float, real-slide units
+    var driftEnabled = !reducedMotion;  // permanently false the moment the user takes manual control
+    var inDiscreteMode = false;         // gates the active-card effect — see the block comment above
+    var currentIndex = 0;               // active-card index; only meaningful once inDiscreteMode
+    var stepping = null;                // {from, to, elapsed, duration} — an in-flight discrete move
+    var focused = false;
+    var lastFrameTime = null;
 
     function getStep() {
       var cs = window.getComputedStyle(track);
@@ -349,130 +363,83 @@
       return allSlides[0].getBoundingClientRect().width + gap;
     }
 
-    function setActive(realIndex) {
+    function render() {
+      var step = getStep();
+      track.style.transform = "translateX(-" + ((realCount + virtualPosition) * step) + "px)";
+    }
+
+    function syncActiveCard() {
       allSlides.forEach(function (el) {
         var card = el.querySelector(".service-card");
-        if (!card) return;
-        card.classList.toggle("is-active", el.getAttribute("data-real-index") === String(realIndex));
+        if (card) card.classList.toggle("is-active", inDiscreteMode && el.getAttribute("data-real-index") === String(currentIndex));
       });
     }
 
-    function syncDots() {
-      var dots = dotsWrap.querySelectorAll(".carousel__dot");
-      dots.forEach(function (dot, i) {
-        dot.setAttribute("aria-current", i === position ? "true" : "false");
-      });
+    function easeInOutCubic(t) {
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     }
 
-    function renderDots() {
-      dotsWrap.innerHTML = "";
-      for (var i = 0; i < realCount; i++) {
-        var dot = document.createElement("button");
-        dot.type = "button";
-        dot.className = "carousel__dot";
-        dot.setAttribute("aria-label", "Go to service " + (i + 1));
-        dot.setAttribute("aria-current", i === position ? "true" : "false");
-        dot.addEventListener("click", (function (idx) {
-          return function () { userNavigate(function () { goToShortest(idx); }); };
-        })(i));
-        dotsWrap.appendChild(dot);
+    function beginStep(distance) {
+      driftEnabled = false;
+      inDiscreteMode = true;
+      if (stepping) return; // a click during an in-flight move is ignored, not queued
+      currentIndex = ((currentIndex + distance) % realCount + realCount) % realCount;
+      syncActiveCard(); // flips immediately, in step with the move about to start — not after it lands
+      if (reducedMotion) {
+        // The sitewide reduced-motion rule neutralizes CSS transitions, but this
+        // track is JS-driven — an eased tween isn't CSS, so it needs its own check.
+        virtualPosition = ((virtualPosition + distance) % realCount + realCount) % realCount;
+        render();
+      } else {
+        stepping = { from: virtualPosition, to: virtualPosition + distance, elapsed: 0, duration: STEP_DURATION };
       }
     }
 
-    function renderAt(virtualPos, animate) {
-      var step = getStep();
-      if (!animate) track.style.transition = "none";
-      track.style.transform = "translateX(-" + ((realCount + virtualPos) * step) + "px)";
-      if (!animate) {
-        void track.offsetHeight; // force reflow so the instant jump doesn't animate
-        track.style.transition = "";
+    function next() { beginStep(1); }
+    function prev() { beginStep(-1); }
+
+    function tick(now) {
+      if (lastFrameTime === null) lastFrameTime = now;
+      var dt = (now - lastFrameTime) / 1000;
+      lastFrameTime = now;
+
+      if (stepping) {
+        // A deliberate arrow move always finishes, even mid-focus-pause —
+        // the user just interacted with the control that triggered it.
+        stepping.elapsed += dt * 1000;
+        var t = Math.min(1, stepping.elapsed / stepping.duration);
+        virtualPosition = stepping.from + (stepping.to - stepping.from) * easeInOutCubic(t);
+        if (t >= 1) {
+          stepping = null;
+          virtualPosition = ((virtualPosition % realCount) + realCount) % realCount;
+        }
+        render();
+      } else if (driftEnabled && !focused) {
+        virtualPosition += DRIFT_SPEED * dt;
+        if (virtualPosition >= realCount) virtualPosition -= realCount;
+        render();
       }
+
+      window.requestAnimationFrame(tick);
     }
 
-    function normalize() {
-      var normalized = ((position % realCount) + realCount) % realCount;
-      if (normalized !== position) {
-        position = normalized;
-        renderAt(position, false);
-      }
-      setActive(position);
-      syncDots();
-      isAnimating = false;
-    }
-
-    function goTo(virtualPos) {
-      if (isAnimating) return;
-      isAnimating = true;
-      position = virtualPos;
-      renderAt(position, true);
-      window.setTimeout(normalize, 650);
-    }
-
-    function goToShortest(targetRealIndex) {
-      var forwardDist = ((targetRealIndex - position) % realCount + realCount) % realCount;
-      var backwardDist = realCount - forwardDist;
-      if (forwardDist <= backwardDist) goTo(position + forwardDist);
-      else goTo(position - backwardDist);
-    }
-
-    function next() { goTo(position + 1); }
-    function prev() { goTo(position - 1); }
-
-    function updatePlayButton() {
-      if (!playBtn) return;
-      playBtn.setAttribute("aria-pressed", playing ? "true" : "false");
-      playBtn.setAttribute("aria-label", playing ? "Pause automatic slideshow" : "Play automatic slideshow");
-      var pauseIcon = playBtn.querySelector(".icon-pause");
-      var playIcon = playBtn.querySelector(".icon-play");
-      if (pauseIcon) pauseIcon.hidden = !playing;
-      if (playIcon) playIcon.hidden = playing;
-    }
-
-    function syncTimer() {
-      if (playing && !suspended) {
-        if (!timer) timer = window.setInterval(next, 8000);
-      } else if (timer) {
-        window.clearInterval(timer);
-        timer = null;
-      }
-    }
-
-    // Any manual navigation stops autoplay for good — it never resumes on
-    // its own after this (WCAG 2.2.2's pause mechanism is the toggle below).
-    function userNavigate(action) {
-      if (playing) {
-        playing = false;
-        updatePlayButton();
-      }
-      syncTimer();
-      action();
-    }
-
-    prevBtn.addEventListener("click", function () { userNavigate(prev); });
-    nextBtn.addEventListener("click", function () { userNavigate(next); });
+    prevBtn.addEventListener("click", prev);
+    nextBtn.addEventListener("click", next);
 
     root.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowRight") { e.preventDefault(); userNavigate(next); }
-      else if (e.key === "ArrowLeft") { e.preventDefault(); userNavigate(prev); }
+      if (e.key === "ArrowRight") { e.preventDefault(); next(); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
     });
 
-    if (playBtn) {
-      playBtn.addEventListener("click", function () {
-        playing = !playing; // the toggle is independent of userNavigate's permanent stop — it can restart autoplay
-        updatePlayButton();
-        syncTimer();
-      });
-    }
-
-    // Hover/focus anywhere in the carousel (viewport, arrows, dots, the
-    // play/pause button) suspends autoplay without touching `playing` —
-    // it resumes on its own once the pointer/focus leaves, unless a manual
-    // navigation already stopped it for good via userNavigate() above.
-    root.addEventListener("mouseenter", function () { suspended = true; syncTimer(); });
-    root.addEventListener("mouseleave", function () { suspended = false; syncTimer(); });
-    root.addEventListener("focusin", function () { suspended = true; syncTimer(); });
+    // Keyboard focus anywhere in the carousel pauses the drift and it
+    // resumes the instant focus leaves — but only while still in drift
+    // mode. Once a manual interaction has switched to discrete mode, focus
+    // no longer means anything to the (now permanently stopped) belt.
+    // Hover intentionally does not pause it: the drift keeps going while
+    // browsing with a mouse.
+    root.addEventListener("focusin", function () { focused = true; });
     root.addEventListener("focusout", function (e) {
-      if (!root.contains(e.relatedTarget)) { suspended = false; syncTimer(); }
+      if (!root.contains(e.relatedTarget)) focused = false;
     });
 
     var touchStartX = null;
@@ -488,23 +455,14 @@
     track.addEventListener("touchend", function () {
       if (touchStartX === null) return;
       var threshold = 40;
-      if (touchDeltaX > threshold) userNavigate(prev);
-      else if (touchDeltaX < -threshold) userNavigate(next);
+      if (touchDeltaX > threshold) prev();
+      else if (touchDeltaX < -threshold) next();
       touchStartX = null;
       touchDeltaX = 0;
     });
 
-    var resizeTimer;
-    window.addEventListener("resize", function () {
-      window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(function () { renderAt(position, false); }, 150);
-    });
-
-    renderAt(position, false);
-    renderDots();
-    setActive(position);
-    updatePlayButton();
-    syncTimer();
+    render();
+    window.requestAnimationFrame(tick);
   }
 
   /* ========================================================================

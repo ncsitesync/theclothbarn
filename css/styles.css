@@ -453,11 +453,23 @@ button {
   position: absolute;
   inset: 0;
   z-index: -1;
-  /* Darkened + raised floor vs. the old placeholder scrim so headline/sub/button
-     text keeps >=4.5:1 contrast even against a worst-case near-white photo pixel
-     (checked arithmetically: floor 0.68 -> ~4.5:1 for cream-100 text, ~4.9:1 for white). */
+  /* Horizontal, not vertical: .hero__content is bottom-LEFT and stays under
+     a flat 0.64 plateau out to 820px (760px content max-width + a ~60px
+     safety margin) — checked arithmetically against a worst-case near-white
+     photo pixel:
+       cream-100 body copy (badge/sub), needs 4.5:1  -> 4.82:1 at 0.64
+       badge chip text (double-composited red-on-scrim), needs 4.5:1 -> 4.66:1
+       white headline, needs 3:1                     -> 5.57:1 at 0.64
+     0.64 was walked down incrementally from the old 0.92/0.80/0.68 floors —
+     0.65 gave 4.99:1, 0.63 gave 4.66:1, 0.62 dropped to 4.495:1 (fails) —
+     so 0.64 is the lightest flat value that still clears 4.5:1 with margin.
+     Past 820px the scrim eases to 0.30 by 1000px and holds there, so the
+     center and right of the photo — including behind the crest, which is
+     opaque with its own shadow and unaffected by what's under it — read
+     much lighter. Below ~820px wide (all of mobile) the plateau never
+     starts transitioning, so this is one rule for every width, not two. */
   background:
-    linear-gradient(to top, rgba(24, 18, 14, 0.92) 0%, rgba(24, 18, 14, 0.80) 45%, rgba(24, 18, 14, 0.68) 100%);
+    linear-gradient(to right, rgba(24, 18, 14, 0.64) 0, rgba(24, 18, 14, 0.64) 820px, rgba(24, 18, 14, 0.30) 1000px);
 }
 .hero__content {
   align-self: flex-end;
@@ -527,7 +539,15 @@ button {
 .hero__crest {
   position: absolute;
   top: 50%;
-  right: var(--container-pad);
+  /* Was flush against the right edge (var(--container-pad), ~20-48px) —
+     reversed and pulled well past that, in toward the text column. Scales
+     with viewport (10vw) rather than a flat value so it keeps closing the
+     gap on wide screens without crowding .hero__content's 760px column on
+     narrower ones: at ~1280-1440px wide this lands the badge roughly
+     130-250px clear of the text (was ~225-350px before), and the 2rem
+     floor keeps it pulled back toward the edge — clear of the lamp — as
+     soon as the viewport narrows toward the 640px cutoff where it hides. */
+  right: clamp(2rem, 10vw, 9rem);
   transform: translateY(-50%);
   width: clamp(180px, 20vw, 300px);
   height: auto;
@@ -546,6 +566,20 @@ button {
    Contrast pairs reuse tokens already verified elsewhere in this file:
    cream-100 on ink-900, ink-900 & ink-600 on cream/paper, red-700 on cream/paper.
    ========================================================================== */
+
+/* Intro block (eyebrow + heading) was top-aligned under the section's own
+   top padding, reading as "empty space above, content sitting low." Drop
+   #carry's own top padding (the intro now owns that vertical rhythm) and
+   center the block within a modest min-height instead — same fix at every
+   width, and the min-height is smaller than the padding it replaces, so
+   Our Services doesn't end up any further down the page than before. */
+#carry { padding-top: 0; }
+.carry-intro {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 220px;
+}
 
 /* Shared full-bleed band: sits as a direct child of .section, outside
    .section__inner, so it spans the viewport without the section's padding. */
@@ -594,15 +628,14 @@ button {
 /* ---- A. Our Services carousel ------------------------------------------
    Extends the gallery's carousel (.carousel / .carousel__viewport /
    .carousel__track / .carousel__arrow / .carousel__dot in the Gallery
-   block below) but drives the track from a continuous requestAnimationFrame
-   loop in js/main.js instead of the gallery's discrete indexed steps, so
-   the drift right-to-left is constant-speed and imperceptible rather than
-   "slide, stop, slide." The CSS transition on .carousel__track is turned
-   off here — JS owns every frame of the transform, and a lingering CSS
-   transition would fight it. Scoped under .services-carousel throughout
-   so the gallery carousel is never touched. No autoplay toggle: it pauses
-   only on hover/focus/interaction, like a showroom display, not a
-   slideshow with controls. See js/main.js initServicesCarousel(). */
+   block below): same measured-step transform math, same touch/keyboard
+   handling. Unlike the gallery, this track is driven every frame by a
+   requestAnimationFrame loop in js/main.js — a continuous conveyor-belt
+   drift, plus discrete steps once the user takes manual control — so its
+   CSS transition is turned off here; JS owns 100% of the transform and a
+   lingering CSS transition would fight it frame-to-frame. Scoped under
+   .services-carousel throughout so the gallery carousel is never touched.
+   See js/main.js initServicesCarousel(). */
 .services-carousel { margin-top: var(--space-6); }
 .services-carousel .carousel__track { transition: none; }
 .services-carousel .carousel__slide { flex: 0 0 88%; }
@@ -697,20 +730,24 @@ button {
 }
 .service-card__link:hover span { transform: translateX(3px); }
 
-/* Pagination dots only — no play/pause control. */
-.services-carousel .carousel__dots { gap: 35px; }
-.services-carousel .carousel__dot::before { inset: -17.5px; } /* 44px tap target, still non-overlapping at a 35px gap */
-
-/* ---- B+C. Trusted Brands + Fabrics & Supplies — one continuous showcase,
-   not two bands with a cream strip between them. Brands no longer has its
-   own light background; it opens the same dark container Fabrics & Supplies
-   closes, separated only by a thin internal rule. ------------------------ */
+/* ---- B+C. Trusted Brands + Fabrics & Supplies — one section, two columns.
+   Brands has no separate wrapper/background/spacing of its own any more;
+   both columns live inside .showcase-band's single padding-block and share
+   one dark surface. Column headings are matched in size/weight (the
+   Fabrics heading gets a showcase-scoped override below, not a change to
+   the shared .rule-heading__title, which Our Services also uses) so
+   neither column reads as the "real" one. -------------------------------- */
 .showcase-band { padding-block: var(--space-8); }
-.showcase-divider {
-  height: 1px;
-  background: var(--border-dark);
-  margin-block: var(--space-8);
+.showcase-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-8);
 }
+@media (min-width: 800px) {
+  .showcase-grid { grid-template-columns: 1fr 1fr; gap: var(--space-10); }
+}
+.showcase-col { display: flex; flex-direction: column; }
+.showcase-col .rule-heading__title { font-size: clamp(1.5rem, 1.2rem + 1.2vw, 2rem); }
 .brands-heading {
   text-align: center;
   max-width: 720px;
@@ -774,36 +811,26 @@ button {
   color: var(--text-on-light-muted);
 }
 
-/* ---- C. Fabrics & Supplies (dark band) — horizontal, one row -------- */
-.fabrics-band {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-4);
-}
-@media (min-width: 900px) {
-  .fabrics-band {
-    grid-template-columns: minmax(260px, 340px) 1fr;
-    gap: var(--space-6);
-  }
-}
+/* ---- C. Fabrics & Supplies — right column, stacked heading-then-list to
+   match the Brands column's rhythm (its old standalone intro+list grid is
+   gone now that it's half-width, not the full container). ------------- */
 .fabrics-band__lede {
   margin-top: var(--space-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-base); /* matches .brands-heading__sub for balance */
   color: var(--text-on-dark-muted);
 }
 .fabrics-band__list {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  row-gap: 1.25em;
+  row-gap: 0.5em; /* was 1.25em — the main lever for a shorter column */
   column-gap: var(--space-4);
-  font-size: var(--text-base);
-  align-content: space-between; /* stretched by the grid row above — spread rather than cluster at top */
+  font-size: 16.5px; /* just above the 16px floor; --text-base (17px) was the smallest step available */
+  margin-top: var(--space-6); /* matches .brands-heading's margin-bottom before .brand-row */
 }
-@media (min-width: 760px) {
+@media (min-width: 800px) {
+  /* Same breakpoint .showcase-grid uses to go two-up — only once this
+     column is actually half-width is there room for a third. */
   .fabrics-band__list { grid-template-columns: repeat(3, 1fr); }
-}
-@media (min-width: 1000px) {
-  .fabrics-band__list { grid-template-columns: repeat(4, 1fr); }
 }
 .fabrics-band__dot {
   display: inline-block;
@@ -818,8 +845,11 @@ button {
 /* ==========================================================================
    Our Story
    ========================================================================== */
-.story__lede { font-size: var(--text-lg); max-width: 70ch; }
-.story__copy { max-width: 70ch; }
+/* All three paragraphs share the smallest size already in use in this
+   section (--text-base, the size .story__copy was already inheriting)
+   rather than the lede's larger --text-lg. */
+.story__lede { font-size: var(--text-base); max-width: 70ch; }
+.story__copy { font-size: var(--text-base); max-width: 70ch; }
 .story__media { aspect-ratio: 3 / 4; border-radius: var(--radius-md); }
 
 /* ==========================================================================
